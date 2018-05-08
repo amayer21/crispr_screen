@@ -185,14 +185,14 @@ if mapper == 'bowtie':
         basename = P.snip(sgRNA_library, ".fasta")
         options = PARAMS['bowtie_options']
         statement = '''
-        /usr/bin/time -o %(outfiles)s.time -v
         bowtie %(options)s
         --threads %(job_threads)s
         %(basename)s
         %(infiles)s
         2> %(outfiles)s.log |
-        samtools view -u |
-        samtools sort -o %(outfiles)s'''
+        samtools view -S -u - 2>>%(outfiles)s.log |
+        samtools sort -@ %(job_threads)s -T %(input_base)s -o %(outfiles)s 2>>%(outfiles)s.log
+	'''
 
         P.run()
 
@@ -229,8 +229,8 @@ elif mapper == 'bowtie2':
         -x %(basename)s
         -U %(infiles)s
         2> %(outfiles)s.log |
-        samtools view -u |
-        samtools sort -o %(outfiles)s
+        samtools view -u 2>>%(outfiles)s.log |
+        samtools sort -@ %(job_threads)s -T %(input_base)s -o %(outfiles)s 2>>%(outfiles)s.log
         '''
 
         P.run()
@@ -246,7 +246,7 @@ else:
            ".bam.bai")
 def index_bam(infile, outfile):
 
-    statement = '''samtools index %(infile)s > %(outfile)s '''
+    statement = '''samtools index %(infile)s > %(outfile)s 2>%(outfile)s.log '''
 
     P.run()
 
