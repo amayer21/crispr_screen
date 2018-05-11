@@ -36,9 +36,10 @@ count_sgRNAs
     # unmapped reads.
 
 count_per_million
-    create final table with sgRNA counts and count per million for all samples
-    export it as a csv file with 1 row per sgRNA and 5 columns: 
-    'gene_sgRNA', 'library', 'sample', 'count', 'cpm'
+    create 3 final tables with sgRNA counts and count per million for all samples
+    (one table with counts, one with CPMs and one with CPMs without STING-sgRNAs)
+    export them as a csv file with 1 row per sgRNA and 4 columns:
+    'lib_gene_sgRNA', 'library', 'sample', 'count' or 'cpm'
 
 
 Usage
@@ -191,8 +192,9 @@ if mapper == 'bowtie':
         %(infiles)s
         2> %(outfiles)s.log |
         samtools view -S -u - 2>>%(outfiles)s.log |
-        samtools sort -@ %(job_threads)s -T %(input_base)s -o %(outfiles)s 2>>%(outfiles)s.log
-	'''
+        samtools sort -@ %(job_threads)s -T %(input_base)s
+        -o %(outfiles)s 2>>%(outfiles)s.log
+        '''
 
         P.run()
 
@@ -230,7 +232,8 @@ elif mapper == 'bowtie2':
         -U %(infiles)s
         2> %(outfiles)s.log |
         samtools view -u 2>>%(outfiles)s.log |
-        samtools sort -@ %(job_threads)s -T %(input_base)s -o %(outfiles)s 2>>%(outfiles)s.log
+        samtools sort -@ %(job_threads)s -T %(input_base)s
+        -o %(outfiles)s 2>>%(outfiles)s.log
         '''
 
         P.run()
@@ -270,33 +273,52 @@ def count_sgRNAs(infile, outfile):
     P.run()
 
 
-# open all count tables one by one, calculate cpm, keep only information needed
-# export 1 table per sample with read count and cpm 
-# also create a final table with cpms for all samples
-@merge(count_sgRNAs, 
-       "sgRNA_counts.dir/%s_%s_final_table.csv" % (experiment, mapper))
+# open all count tables one by one, calculate cpm with and without STING
+# create 3 final tables with counts or cpms for all samples
+@merge(count_sgRNAs,
+       "sgRNA_counts.dir/%s_%s_final_cpm.csv" % (experiment, mapper))
 def count_per_million(infiles, outfile):
+    final_counts_table = pd.DataFrame(columns=
+                               ['lib_gene_sgRNA', 'library', 'sample', 'count'])
     final_cpm_table = pd.DataFrame(columns=
-                               ['gene_sgRNA', 'library', 'sample', 'count', 'cpm'])
+                               ['lib_gene_sgRNA', 'library', 'sample', 'cpm'])
+    final_cpm_noSTING_table = pd.DataFrame(columns=
+                               ['lib_gene_sgRNA', 'library', 'sample', 'cpm'])
+
+    final_counts_output = P.snip(outfile, "cpm.csv")+"counts.csv"
+    cpm_noSTING_output = P.snip(outfile, ".csv")+"_noSTING.csv"
+
     for infile in infiles:
+        # open file one by one and generate a table with all sgRNA
+        df = pd.read_table(infile, header = None,
+                       names = ['lib_gene_sgRNA', 'length', 'count', 'missing'],
+                       usecols = ['lib_gene_sgRNA', 'count'])
+        # add columns for library and sample
         m = re.match(r'sgRNA_counts.dir/(\S+?)-(\S+?)_.*(bowtie2?).tsv', infile)
         lib = m.group(1)
         sample = m.group(2)
-        df = pd.read_table(infile, header = None,
-                       names = ['gene_sgRNA', 'length', 'count', 'missing'],
-                       usecols = ['gene_sgRNA', 'count'])
-        count_sum = df['count'].sum()
-        df['cpm'] = 1000000*df['count']/count_sum
         df['library'] = lib
         df['sample'] = sample
-        df = df[['gene_sgRNA', 'library', 'sample', 'count', 'cpm']]
-        individual_output = P.snip(infile, '.tsv')+'_cpm.csv'
-        df.to_csv(individual_output, header=True, index=False)
+        # append read count table
+        df = df[['lib_gene_sgRNA', 'library', 'sample', 'count']]
+        final_counts_table = final_counts_table.append(df)
+        # generate table without STING
+        df_noSTING = df[df['lib_gene_sgRNA'].str.contains("TMEM173") == False]
+        # add column with cpm to both tables
+        count_sum = df['count'].sum()
+        count_sum_noSTING = df_noSTING['count'].sum()
+        df['cpm'] = 1000000*df['count']/count_sum
+        df_noSTING['cpm'] = 1000000*df_noSTING['count']/count_sum_noSTING
+        # append cpm tables
+        df = df[['lib_gene_sgRNA', 'library', 'sample', 'cpm']]
+        df_noSTING = df_noSTING[['lib_gene_sgRNA', 'library', 'sample', 'cpm']]
         final_cpm_table = final_cpm_table.append(df)
-    
-    final_cpm_table.to_csv(outfile, index=False)
+        final_cpm_noSTING_table = final_cpm_noSTING_table.append(df_noSTING)
 
-   # P.run()
+    final_cpm_table.to_csv(outfile, index = False)
+    final_counts_table.to_csv(final_counts_output, index = False)
+    final_cpm_noSTING_table.to_csv(cpm_noSTING_output, index = False)
+
 
 
 
